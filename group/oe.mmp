@@ -1,0 +1,51 @@
+TARGET oe.exe
+TARGETTYPE exe
+UID 0x100039CE 0xE0E1E001
+CAPABILITY UserEnvironment
+
+EPOCSTACKSIZE 0x14000
+EPOCHEAPSIZE 0x200000 0x1800000
+
+LANG SC
+SYSTEMINCLUDE ..\inc
+SYSTEMINCLUDE \epoc32\include
+SYSTEMINCLUDE \epoc32\include\libc
+SYSTEMINCLUDE \epoc32\include\stdapis
+
+USERINCLUDE ..\inc
+
+SOURCEPATH ..\src
+SOURCE oe_app.cpp platform_s60.cpp pmd_stub.c
+
+/* Engine. Unpack oe-re-main.zip so this relative path resolves. */
+SOURCEPATH ..\..\oe-re-main\src
+SOURCE bar.c moddata.c
+SOURCEPATH ..\..\oe-re-main\src\game
+SOURCE app.c brew_shim.c canvas.c canvas_input.c canvas_move.c
+SOURCE combat.c combat_attack.c
+SOURCE core_gfx.c core_particle.c core_sound.c core_stream.c core_text.c
+SOURCE entity.c entity_ai.c
+SOURCE game_entities.c game_monsters.c game_movers.c game_save.c game_sprites.c game_world.c
+SOURCE hud.c hud_draw.c
+SOURCE menu_build.c menu_items.c menu_select.c menu_system.c
+SOURCE player.c player_draw.c player_items.c player_save.c
+SOURCE render.c render_load.c render_span.c render_sprite.c
+SOURCE script.c script_exec.c
+SOURCE ui_dialog.c ui_screens.c ui_text.c
+
+/* Do not compile main.c, platform_sdl.c or src/pmd.c (ffmpeg). */
+
+LIBRARY euser.lib estor.lib efsrv.lib
+LIBRARY apparc.lib cone.lib eikcore.lib avkon.lib eikcoctl.lib bafl.lib
+LIBRARY gdi.lib bitgdi.lib fbscli.lib ws32.lib
+LIBRARY libc.lib libm.lib libz.lib
+
+MACRO OE_GAME=1
+
+START RESOURCE ..\data\oe_reg.rss
+TARGET oe_reg.rsc
+END
+
+START RESOURCE ..\data\oe.rss
+TARGET oe.rsc
+END

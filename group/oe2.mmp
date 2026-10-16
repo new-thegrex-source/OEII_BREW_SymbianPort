@@ -1,0 +1,56 @@
+TARGET oe2.exe
+TARGETTYPE exe
+UID 0x100039CE 0xE0E2E002
+CAPABILITY UserEnvironment
+
+EPOCSTACKSIZE 0x14000
+EPOCHEAPSIZE 0x200000 0x1800000
+
+LANG SC
+SYSTEMINCLUDE ..\inc
+SYSTEMINCLUDE ..\src
+SYSTEMINCLUDE \epoc32\include
+SYSTEMINCLUDE \epoc32\include\libc
+SYSTEMINCLUDE \epoc32\include\stdapis
+
+USERINCLUDE ..\inc
+USERINCLUDE ..\src
+
+// All sources live in this tree: group is next to src.
+SOURCEPATH ..\src
+SOURCE oe_app.cpp platform_s60.cpp pmd_stub.c
+SOURCE bar.c moddata.c
+
+SOURCEPATH ..\src\game
+SOURCE app.c brew_shim.c canvas.c canvas_input.c canvas_move.c
+SOURCE combat.c combat_attack.c combat_weapon.c
+SOURCE core_gfx.c core_res.c core_sound.c core_string.c core_text.c
+SOURCE entity.c entity_ai.c
+SOURCE game_monsters.c game_save.c game_sprites.c game_world.c
+SOURCE hud.c hud_draw.c
+SOURCE menu_build.c menu_items.c menu_select.c menu_system.c menu_tellafriend.c
+SOURCE player.c player_draw.c player_items.c player_save.c
+SOURCE render.c render_load.c render_span.c render_sprite.c
+SOURCE script.c script_ext.c script_run.c
+SOURCE ui_dialog.c ui_screens.c ui_text.c
+
+// Not built: main.c, platform_sdl.c, pmd.c (needs ffmpeg).
+
+LIBRARY euser.lib estor.lib efsrv.lib hal.lib
+LIBRARY apparc.lib cone.lib eikcore.lib avkon.lib eikcoctl.lib bafl.lib
+LIBRARY gdi.lib bitgdi.lib fbscli.lib ws32.lib
+LIBRARY libc.lib libm.lib libz.lib
+
+MACRO OE_GAME=2
+
+// GCCE 3.4.3 defaults to C89. The engine uses declarations in for loops.
+OPTION GCCE -std=gnu99
+
+SOURCEPATH ..\data
+START RESOURCE oe2_reg.rss
+TARGET oe2_reg.rsc
+END
+
+START RESOURCE oe2.rss
+TARGET oe2.rsc
+END

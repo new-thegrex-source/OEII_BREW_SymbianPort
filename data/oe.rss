@@ -1,0 +1,10 @@
+#include <eikon.rh>
+
+RESOURCE RSS_SIGNATURE { }
+
+RESOURCE TBUF r_oe_caption { buf = "Orcs & Elves"; }
+
+RESOURCE TBUF
+	{
+	buf = "Orcs & Elves";
+	}
