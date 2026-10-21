@@ -23,7 +23,7 @@ _LIT(KOeCaption, "Orcs & Elves");
 
 class COeAppUi;
 
-/* Phone-side framebuffer the engine scales into. 352x416 is the N80 panel. */
+/* Phone-side framebuffer the engine scales into. Sized to the actual screen at runtime. */
 class COeContainer : public CCoeControl
 {
 public:
@@ -34,6 +34,8 @@ public:
 	void Lock();
 	void Unlock();
 	TInt PitchPixels() const { return iPitch; }
+	TInt Width() const { return iW; }
+	TInt Height() const { return iH; }
 	void SetEngineSize(TInt aW, TInt aH);
 private:
 	void ConstructL(const TRect& aRect);
@@ -41,6 +43,8 @@ private:
 	CFbsBitmapDevice* iDevice;
 	CFbsBitGc* iGc;
 	TInt iPitch;
+	TInt iW;
+	TInt iH;
 	TInt iEngW;
 	TInt iEngH;
 };
@@ -73,6 +77,7 @@ public:
 	TKeyResponse HandleKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType);
 	COeContainer* Container() { return iContainer; }
 private:
+	void HideFurniture();
 	static TInt TickCb(TAny* aSelf);
 	void Tick();
 	COeContainer* iContainer;

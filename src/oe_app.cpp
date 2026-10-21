@@ -6,7 +6,11 @@
 
 #include <eikstart.h>
 #include <aknnotewrappers.h>
+#include <eikspane.h>
+#include <eikbtgpc.h>
 #include <e32std.h>
+#include <stdio.h>
+extern "C" int snprintf(char* s, size_t n, const char* fmt, ...);
 
 /* Same stdint bypass as platform_s60.cpp: Open C's header breaks under C++. */
 #ifndef _STDINT_H_
@@ -67,31 +71,50 @@ CEikAppUi* COeDocument::CreateAppUiL()
 	return new (ELeave) COeAppUi;
 }
 
+static void BootLogNum(const char* aTag, TInt aNum)
+{
+	char b[64];
+	snprintf(b, sizeof(b), "%s %d", aTag, (int)aNum);
+	BootLog(b);
+}
+
+static void ProbeFile(RFs& aFs, const TDesC& aPath, const char* aTag)
+{
+	TEntry e;
+	TInt err = aFs.Entry(aPath, e);
+	char b[64];
+	if (err == KErrNone)
+		snprintf(b, sizeof(b), "%s: found, %d bytes", aTag, (int)e.iSize);
+	else
+		snprintf(b, sizeof(b), "%s: err %d", aTag, (int)err);
+	BootLog(b);
+}
+
 void COeApplication::PreDocConstructL()
 {
 	BootLog("b5 PreDoc");
 	RFs fs;
 	if (fs.Connect() == KErrNone) {
-		TEntry e;
-		if (fs.Entry(_L("e:\\resource\\apps\\oe2.rsc"), e) == KErrNone)
-			BootLog("rsc on e");
-		else if (fs.Entry(_L("c:\\resource\\apps\\oe2.rsc"), e) == KErrNone)
-			BootLog("rsc on c");
-		else
-			BootLog("rsc not visible");
+		ProbeFile(fs, _L("c:\\resource\\apps\\oe2.rsc"), "c: oe2.rsc");
+		ProbeFile(fs, _L("e:\\resource\\apps\\oe2.rsc"), "e: oe2.rsc");
+		ProbeFile(fs, _L("c:\\private\\10003a3f\\import\\apps\\oe2_reg.rsc"), "c: oe2_reg.rsc");
+		ProbeFile(fs, _L("e:\\private\\10003a3f\\import\\apps\\oe2_reg.rsc"), "e: oe2_reg.rsc");
 		fs.Close();
 	}
-	BootLog("before eik");
-	TRAPD(err, CEikApplication::PreDocConstructL());
-	if (err == KErrNone)
-		BootLog("eik ok");
-	else if (err == KErrNotFound)
-		BootLog("eik not found");
-	else if (err == KErrCorrupt)
-		BootLog("eik corrupt");
-	else
-		BootLog("eik other");
+#ifdef OE_NO_APP_RSC
+	/* Isolation / Open C style: do not let the framework load oe2.rsc at all. */
+	BootLog("PreDoc skipped (OE_NO_APP_RSC)");
+	return;
+#else
+	BootLog("before CAknApplication::PreDocConstructL");
+	/* Do NOT skip CAknApplication: it does the Avkon setup. Calling
+	 * CEikApplication::PreDocConstructL() directly bypassed it. If the SDK's
+	 * CAknApplication does not declare its own version, this resolves to the
+	 * inherited CEikApplication one, so it compiles either way. */
+	TRAPD(err, CAknApplication::PreDocConstructL());
+	BootLogNum("PreDocConstructL result", err);
 	User::LeaveIfError(err);
+#endif
 }
 
 CApaDocument* COeApplication::CreateDocumentL()
@@ -192,7 +215,10 @@ static void BootLog(const char* aMsg)
 		f.Size(size);
 		f.Seek(ESeekStart, size);
 		TBuf8<160> line;
-		line.Copy(TPtrC8((const TUint8*)aMsg));
+		TInt ml = User::StringLength((const TUint8*)aMsg);
+		if (ml > 150)
+			ml = 150;
+		line.Copy(TPtrC8((const TUint8*)aMsg, ml));
 		line.Append(_L8("\r\n"));
 		f.Write(line);
 		f.Close();
@@ -201,11 +227,29 @@ static void BootLog(const char* aMsg)
 	fs.Close();
 }
 
+void COeAppUi::HideFurniture()
+{
+	CEikStatusPane* sp = StatusPane();
+	if (sp)
+		sp->MakeVisible(EFalse);
+	CEikButtonGroupContainer* cba = Cba();
+	if (cba)
+		cba->MakeVisible(EFalse);
+}
+
 void COeAppUi::ConstructL()
 {
 	BootLog("b2 start");
+#ifdef OE_NO_APP_RSC
+	BaseConstructL(CAknAppUi::EAknEnableSkin | ENoAppResourceFile);
+#else
 	BaseConstructL(CAknAppUi::EAknEnableSkin);
-	iContainer = COeContainer::NewL(ClientRect());
+#endif
+	BootLog("b2 BaseConstructL ok");
+	HideFurniture();
+	/* Full screen: ApplicationRect() includes the area the status pane and
+	 * softkeys would otherwise take. ClientRect() left a bar at the top. */
+	iContainer = COeContainer::NewL(ApplicationRect());
 	AddToStackL(iContainer);
 	BootLog("container ok");
 
@@ -213,6 +257,12 @@ void COeAppUi::ConstructL()
 	PickDataDir(dir, (int)sizeof(dir));
 	Plat_setDataDir(dir);
 	BootLog(dir);
+	{
+		char ep[300];
+		snprintf(ep, sizeof(ep), "%soe2err.txt", dir);
+		freopen(ep, "a", stderr);
+		setvbuf(stderr, NULL, _IONBF, 0);
+	}
 
 	if (Brew_init(dir, KEngW, KEngH) != 0) {
 		BootLog("brew_init failed");
@@ -233,22 +283,25 @@ void COeAppUi::ConstructL()
 	}
 	Audio_init();
 	iContainer->SetEngineSize(KEngW, KEngH);
-	/* DataAddress() is only valid while the bitmap heap is locked. */
+	/* The FBS heap is locked only while the engine writes into it (see Tick). */
 	iContainer->Lock();
-	OeS60_SetPresentTarget(iContainer->Pixels(), iContainer->PitchPixels(), 352, 416);
+	OeS60_SetPresentTarget(iContainer->Pixels(), iContainer->PitchPixels(), iContainer->Width(), iContainer->Height());
 
 	gApp = App_create(KEngW, KEngH);
+	iContainer->Unlock();
 	if (!gApp) {
 		BootLog("app_create failed");
 		ShowFailL(_L("App_create failed"));
-		iContainer->Unlock();
 		Plat_shutdown();
 		Brew_shutdown();
 		Exit();
 		return;
 	}
 	BootLog("before app_start");
+	iContainer->Lock();
+	OeS60_SetPresentTarget(iContainer->Pixels(), iContainer->PitchPixels(), iContainer->Width(), iContainer->Height());
 	Applet_HandleEvent(gApp, EVT_APP_START, 0, 0);
+	iContainer->Unlock();
 	BootLog("app_start ok");
 
 	iTicker = CPeriodic::NewL(CActive::EPriorityStandard);
@@ -285,6 +338,8 @@ void COeAppUi::HandleCommandL(TInt aCommand)
 void COeAppUi::HandleForegroundEventL(TBool aForeground)
 {
 	CAknAppUi::HandleForegroundEventL(aForeground);
+	if (aForeground)
+		HideFurniture();
 	int suspended = aForeground ? 0 : 1;
 	OeS60_SetMinimized(suspended);
 	if (gApp) {
@@ -330,11 +385,16 @@ void COeAppUi::Tick()
 		Applet_HandleEvent(gApp, EVT_KEY, gHeldKey, KKbAutorepeat);
 		gNextRepeat += KRepeatRate;
 	}
+	if (iContainer) {
+		/* lock only for the engine tick; refresh the pointer after every lock */
+		iContainer->Lock();
+		OeS60_SetPresentTarget(iContainer->Pixels(), iContainer->PitchPixels(), iContainer->Width(), iContainer->Height());
+	}
 	Applet_Tick(gApp);
 	if (iContainer) {
+		OeS60_SetPresentTarget(0, 0, iContainer->Width(), iContainer->Height()); /* nothing may touch it unlocked */
 		iContainer->Unlock();
 		iContainer->DrawNow();
-		iContainer->Lock();
 	}
 }
 
@@ -398,8 +458,13 @@ void COeContainer::ConstructL(const TRect& aRect)
 {
 	CreateWindowL();
 	iBitmap = new (ELeave) CFbsBitmap;
-	User::LeaveIfError(iBitmap->Create(TSize(352, 416), EColor64K));
-	iPitch = iBitmap->ScanLineLength(352, EColor64K) / 2;
+	/* Back buffer = the real screen size, so the same build runs on 352x416 (N80),
+	 * 240x320 (N95, E65...) and others. The engine output is scaled into it. */
+	iW = aRect.Width();
+	iH = aRect.Height();
+	if (iW < 64 || iH < 64) { iW = 240; iH = 320; }
+	User::LeaveIfError(iBitmap->Create(TSize(iW, iH), EColor64K));
+	iPitch = iBitmap->ScanLineLength(iW, EColor64K) / 2;
 	iDevice = CFbsBitmapDevice::NewL(iBitmap);
 	User::LeaveIfError(iDevice->CreateContext(iGc));
 	SetRect(aRect);

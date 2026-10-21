@@ -116,12 +116,14 @@ extern "C" uint32_t Plat_uptimeMs(void)
 {
 	if (gVirtClock)
 		return gVirtNow;
-	TInt tick = 0;
-	/* ESystemTickCount is not in the FP1 HAL enum. NTickCount is milliseconds
-	 * on S60 3rd. */
-	if (HAL::Get(HALData::ENanoTickPeriod, tick) == KErrNone && tick > 0)
-		return (uint32_t)((User::NTickCount() * (TUint)tick) / 1000000u);
-	return (uint32_t)User::NTickCount();
+	/* ENanoTickPeriod is in MICROseconds per NTickCount tick. The old code divided by
+	 * 1e6 (that is seconds) and multiplied in 32 bits (wraps after ~70 min). */
+	static TInt period = 0;
+	if (period <= 0) {
+		TInt p = 0;
+		period = (HAL::Get(HALData::ENanoTickPeriod, p) == KErrNone && p > 0) ? p : 1000;
+	}
+	return (uint32_t)(((TUint64)User::NTickCount() * (TUint64)period) / 1000u);
 }
 
 extern "C" int Plat_isMinimized(void) { return gMinimized; }
@@ -138,11 +140,13 @@ extern "C" void Plat_vibrate(int ms)
 	(void)ms;
 }
 
-/* Fit 176x220 into the panel, keeping the aspect. On the N80 (352x416)
- * that is almost 2x: 332x416, with 10px of black either side. */
+/* Fit 176x220 into the panel, keeping the aspect. N80 (352x416): 332x416 with
+ * black bars at the sides. 240x320: 240x300 with 10px bars top and bottom. */
 extern "C" void Plat_present(const uint16_t* fb, int pitchPixels)
 {
-	if (!gPhone || !fb || gW <= 0 || gH <= 0)
+	static short xmap[1024];
+	static int mapDstW = 0, mapSrcW = 0;
+	if (!gPhone || !fb || gW <= 0 || gH <= 0 || gPhoneW > 1024)
 		return;
 	int dstW = gPhoneW;
 	int dstH = gH * gPhoneW / gW;
@@ -152,23 +156,38 @@ extern "C" void Plat_present(const uint16_t* fb, int pitchPixels)
 	}
 	int ox = (gPhoneW - dstW) / 2;
 	int oy = (gPhoneH - dstH) / 2;
+	if (mapDstW != dstW || mapSrcW != gW) {
+		for (int x = 0; x < dstW; ++x) {
+			int sx = x * gW / dstW;
+			xmap[x] = (short)(sx >= gW ? gW - 1 : sx);
+		}
+		mapDstW = dstW;
+		mapSrcW = gW;
+	}
+	/* black bars only (letterbox), not the whole panel every frame */
 	for (int y = 0; y < gPhoneH; ++y) {
 		TUint16* row = gPhone + y * gPhonePitch;
-		for (int x = 0; x < gPhoneW; ++x)
-			row[x] = 0;
+		if (y < oy || y >= oy + dstH) {
+			for (int x = 0; x < gPhoneW; ++x) row[x] = 0;
+		} else {
+			for (int x = 0; x < ox; ++x) row[x] = 0;
+			for (int x = ox + dstW; x < gPhoneW; ++x) row[x] = 0;
+		}
 	}
+	int prevSy = -1;
 	for (int y = 0; y < dstH; ++y) {
 		int sy = y * gH / dstH;
 		if (sy >= gH)
 			sy = gH - 1;
-		const uint16_t* src = fb + sy * pitchPixels;
 		TUint16* dst = gPhone + (oy + y) * gPhonePitch + ox;
-		for (int x = 0; x < dstW; ++x) {
-			int sx = x * gW / dstW;
-			if (sx >= gW)
-				sx = gW - 1;
-			dst[x] = src[sx];
+		if (sy == prevSy) { /* 2x upscale: repeat the previous row */
+			memcpy(dst, dst - gPhonePitch, (size_t)dstW * 2);
+			continue;
 		}
+		prevSy = sy;
+		const uint16_t* src = fb + sy * pitchPixels;
+		for (int x = 0; x < dstW; ++x)
+			dst[x] = src[xmap[x]];
 	}
 }
 
